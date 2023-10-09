@@ -1,7 +1,10 @@
-# iFR
-<img src="img/GUI.png" height="500px">
+<div align="center">
+             <img src="img/iFR.png" alt="iFR Logo" width="150">
+             <h1>iFR</h1>
+             <i>A simple yet powerful Flashrom GUI</i>
+</div>
 
-*A simple yet powerful Flashrom GUI*
+<img src="img/GUI.png" height="500px" alt="A screenshot of the iFR GUI">
 
 
 ## Features
