@@ -2,10 +2,8 @@
              <img src="img/iFR.png" alt="iFR Logo" width="150">
              <h1>iFR</h1>
              <i>A simple yet powerful Flashrom GUI</i>
+             <img src="img/GUI.png" height="500px" alt="A screenshot of the iFR GUI">
 </div>
-
-<img src="img/GUI.png" height="500px" alt="A screenshot of the iFR GUI">
-
 
 ## Features
 - Native Flashrom GUI
