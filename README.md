@@ -1,5 +1,6 @@
 # iFR
-![A screenshot of the iFR interface](img/GUI.png)
+<img src="img/GUI.png" height="500px">
+
 *A simple yet powerful Flashrom GUI*
 
 
