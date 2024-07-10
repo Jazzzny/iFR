@@ -500,8 +500,9 @@ class iFR(wx.Frame):
     def PopulateAvailableProgrammers(self):
         output = subprocess.Popen([self.constants.flashrom_path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         output_lines = output.stdout.readlines()
-        options_start = output_lines.index(b'Valid choices are:\n')
-        if not options_start:
+        try:
+            options_start = output_lines.index(b'Valid choices are:\n')
+        except:
             options_start = output_lines.index(b"To choose the mainboard of this computer use 'internal'. Valid choices are:\n")
         options = [line.decode('utf-8').strip() for line in output_lines[options_start+1:]]
         programmers = list(
