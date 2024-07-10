@@ -4,29 +4,52 @@ By Jazzzny. Copyright (c) 2023
 Licensed under the GNU GPL v2 license.
 """
 
-import wx
 import logging
 import subprocess
 import itertools
 import os
 import tempfile
 import shutil
+import wx
+import threading
 
 class Constants():
     def __init__(self):
         self.version = "1.0.0-devel"
-        self.flashrom_version = self._get_flashrom_version()
+        self.flashrom_path = self._find_flashrom()
+        self.flashrom_version = self._get_flashrom_version(self.flashrom_path)
         self.programmer = ""
         self.tempdir = self.CreateTemporaryDirectory()
 
-    def _get_flashrom_version(self):
-        ver = subprocess.Popen(["flashrom", "--version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    def _find_flashrom(self):
+        """
+        Find the flashrom binary
+        """
+        if os.path.isfile("/usr/bin/flashrom"):
+            return "/usr/bin/flashrom"
+        elif os.path.isfile("/usr/local/bin/flashrom"):
+            return "/usr/local/bin/flashrom"
+        elif os.path.isfile("/opt/homebrew/bin/flashrom"):
+            return "/opt/homebrew/bin/flashrom"
+        elif os.path.isfile("/opt/local/bin/flashrom"):
+            return "/opt/local/bin/flashrom"
+        else:
+            return "flashrom"
+
+    def _get_flashrom_version(self, flashrom_path):
+        ver = subprocess.Popen([flashrom_path, "--version"],
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT,
+                               universal_newlines=True)
+
         for stdout_line in iter(ver.stdout.readline, ""):
             if "flashrom" in stdout_line:
                 return stdout_line.split(" ")[1].strip()
-    
+
     def CreateTemporaryDirectory(self):
         return tempfile.mkdtemp()
+
+
 
 class Support():
     """
@@ -49,7 +72,7 @@ class Support():
                 else:
                     # Stop when non-padding content is encountered
                     break
-                
+
             os.truncate(file_path, os.path.getsize(file_path) - padding_size)
             return padding_size
 
@@ -61,48 +84,6 @@ class Support():
             file.write(b'\xFF' * padding_size)
         return padding_size
 
-class AboutDialog(wx.Dialog):
-    """
-    Displays information about the app
-    """
-
-    def __init__(self, parent, constants):
-        self.constants = constants
-        wx.Dialog.__init__(self, parent, title="")
-
-        title = wx.StaticText(self, label="iFR")
-
-        version = wx.StaticText(self, label=f"Version {constants.version}")
-
-        description = wx.StaticText(self, label="A simple yet powerful Flashrom GUI")
-
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(title, 0, wx.ALIGN_CENTER_HORIZONTAL|wx.TOP|wx.LEFT|wx.RIGHT, 20)
-        sizer.Add(version, 0, wx.ALIGN_CENTER_HORIZONTAL|wx.TOP|wx.LEFT|wx.RIGHT, 10)
-        sizer.Add(description, 0, wx.ALIGN_CENTER_HORIZONTAL|wx.TOP|wx.LEFT|wx.RIGHT, 10)
-        sizer.Add(wx.StaticLine(self), 0, wx.EXPAND|wx.TOP|wx.BOTTOM, 10)
-
-        self.SetSizer(sizer)
-        self.Fit()
-
-class GeneralPage(wx.StockPreferencesPage):
-    def CreateWindow(self, parent):
-        panel = wx.Panel(parent)
-        panel.SetMinSize((380, 200))
-        return panel
-
-class AdvancedPage(wx.StockPreferencesPage):
-    def CreateWindow(self, parent):
-        panel = wx.Panel(parent)
-        panel.SetMinSize((380, 200))
-        return panel
-
-class PreferencesDialog(wx.PreferencesEditor):
-    def __init__(self):
-        super().__init__()
-        self.AddPage(GeneralPage(0))
-        self.AddPage(AdvancedPage(1))
-
 class PageRead(wx.Panel):
     """
     Generates the Read ROM page
@@ -113,7 +94,11 @@ class PageRead(wx.Panel):
         wx.Panel.__init__(self, parent)
 
         self.filepicker_title = wx.StaticText(self, label="Save ROM to:")
-        self.filepicker = wx.FilePickerCtrl(self, message="", wildcard="*.bin", style=wx.FLP_SAVE|wx.FLP_USE_TEXTCTRL)
+        self.filepicker = wx.FilePickerCtrl(self,
+                                            message="",
+                                            wildcard="*.bin",
+                                            style=wx.FLP_SAVE|wx.FLP_USE_TEXTCTRL)
+
         self.chip_dropdown_title = wx.StaticText(self, label="Select Chip:")
         self.chip_dropdown = wx.Choice(self)
         self.chip_autodetect = wx.Button(self, label="Auto Detect", size=(100, -1))
@@ -129,7 +114,7 @@ class PageRead(wx.Panel):
         chip_sizer = wx.BoxSizer(wx.HORIZONTAL)
         chip_sizer.Add(self.chip_dropdown, 1, wx.EXPAND)
         chip_sizer.Add(self.chip_autodetect, 0, wx.LEFT, 5)
-        
+
         sizer.Add(self.filepicker_title, 0, wx.ALIGN_CENTER | wx.TOP|wx.BOTTOM, 10)
         sizer.Add(self.filepicker, 0, wx.EXPAND | wx.LEFT|wx.RIGHT, 20)
         sizer.Add(self.chip_dropdown_title, 0, wx.ALIGN_CENTER | wx.TOP|wx.BOTTOM, 10)
@@ -138,7 +123,7 @@ class PageRead(wx.Panel):
         sizer.Add(self.remove_padding, 0, wx.ALIGN_CENTER | wx.TOP, 20)
         sizer.Add(self.save_button, 0, wx.ALIGN_CENTER | wx.TOP, 24)
         self.SetSizer(sizer)
-    
+
     def OnSave(self, event):
         filepath = self.filepicker.GetPath()
         if filepath == "":
@@ -147,13 +132,20 @@ class PageRead(wx.Panel):
         if len(self.chip_dropdown.GetItems()) == 0:
             logging.info("Please run Auto Detect to determine your chip type.")
             return
-        
-        result = subprocess.Popen(["flashrom", "--programmer", self.constants.programmer, "-r", filepath, "--chip", self.chip_dropdown.GetStringSelection()], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+
+        result = subprocess.Popen([self.constants.flashrom_path,
+                                "--programmer", self.constants.programmer,
+                                "-r", filepath,
+                                "--chip", self.chip_dropdown.GetStringSelection()],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                universal_newlines=True)
+
         for stdout_line in iter(result.stdout.readline, ""):
             logging.info(stdout_line.strip())
         if self.show_upon_completion.GetValue() and os.path.isfile(filepath):
             subprocess.Popen(["open", "-R", filepath])
-        
+
         if self.remove_padding.GetValue() and os.path.isfile(filepath):
             logging.info("Removing padding from ROM dump...")
             result = Support.RemovePadding(filepath)
@@ -161,24 +153,35 @@ class PageRead(wx.Panel):
 
         if not os.path.isfile(filepath):
             logging.info("ERROR: ROM dump was not saved. Please check the output above for more information.")
-    
+
     def OnAutoDetect(self, event):
         if self.constants.programmer == "":
             logging.info("Please select a programmer.")
             return
-        chips_raw = subprocess.Popen(["flashrom", "--programmer", self.constants.programmer, "--flash-name"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        chips_raw = subprocess.Popen([self.constants.flashrom_path,
+                                      "--programmer", self.constants.programmer,
+                                      "--flash-name"],
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT,
+                                      universal_newlines=True)
+
         for stdout_line in iter(chips_raw.stdout.readline, ""):
-            if "Found" in stdout_line:                
-                logging.info("Found ROM chip: " + stdout_line.strip().split('"')[1]) # Cannot use f-string unless we use Python 3.12
+            if "Found" in stdout_line:
+                # Cannot use f-string unless we use Python 3.12
+                logging.info("Found ROM chip: " + stdout_line.strip().split('"')[1])
                 self.chip_dropdown.Append(stdout_line.strip().split('"')[1])
+
         if len(self.chip_dropdown.GetItems()) > 1:
             logging.info("WARNING: More than 1 possible chip detected. Please select the correct chip from the dropdown.")
-            dlg = wx.MessageDialog(self, "More than 1 possible chip detected. Please select the correct chip from the dropdown.", "Warning", wx.OK | wx.ICON_WARNING)
+            dlg = wx.MessageDialog(self,
+                                   "More than 1 possible chip detected. Please select the correct chip from the dropdown.",
+                                   "Warning",
+                                   wx.OK | wx.ICON_WARNING)
             dlg.ShowModal()
             self.chip_dropdown.Enable()
         elif len(self.chip_dropdown.GetItems()) == 0:
             logging.info("No ROM chip detected. Please check your programmer connection.")
-                 
+
 class PageWrite(wx.Panel):
     """
     Generates the Write ROM page
@@ -189,7 +192,11 @@ class PageWrite(wx.Panel):
         wx.Panel.__init__(self, parent)
 
         self.filepicker_title = wx.StaticText(self, label="File to Flash:")
-        self.filepicker = wx.FilePickerCtrl(self, message="", wildcard="ROM and BIN files (*.rom;*.bin)|*.rom;*.bin", style=wx.FLP_USE_TEXTCTRL)
+        self.filepicker = wx.FilePickerCtrl(self,
+                                            message="",
+                                            wildcard="ROM and BIN files (*.rom;*.bin)|*.rom;*.bin",
+                                            style=wx.FLP_USE_TEXTCTRL)
+
         self.chip_dropdown_title = wx.StaticText(self, label="Select Chip:")
         self.chip_dropdown = wx.Choice(self)
         self.chip_autodetect = wx.Button(self, label="Auto Detect", size=(100, -1))
@@ -204,7 +211,7 @@ class PageWrite(wx.Panel):
         chip_sizer = wx.BoxSizer(wx.HORIZONTAL)
         chip_sizer.Add(self.chip_dropdown, 1, wx.EXPAND)
         chip_sizer.Add(self.chip_autodetect, 0, wx.LEFT, 5)
-        
+
         sizer.Add(self.filepicker_title, 0, wx.ALIGN_CENTER | wx.TOP|wx.BOTTOM, 10)
         sizer.Add(self.filepicker, 0, wx.EXPAND | wx.LEFT|wx.RIGHT, 20)
         sizer.Add(self.chip_dropdown_title, 0, wx.ALIGN_CENTER | wx.TOP|wx.BOTTOM, 10)
@@ -222,18 +229,36 @@ class PageWrite(wx.Panel):
             logging.info("Please run Auto Detect to determine your chip type.")
             return
 
-        warndlg = wx.MessageDialog(self, "Are you sure you want to flash this ROM? This action cannot be undone. It is strongly recommmended to back up the ROM first!", "Warning", wx.YES_NO | wx.ICON_WARNING)
+        warndlg = wx.MessageDialog(self,
+                                   "Are you sure you want to flash this ROM? This action cannot be undone. It is strongly recommmended to back up the ROM first!",
+                                   "Warning",
+                                   wx.YES_NO | wx.ICON_WARNING)
         if warndlg.ShowModal() == wx.ID_NO:
             return
-        
+
         if self.pad_file.GetValue():
             logging.info("Padding temporary file to match chip size...")
-            chipsize = subprocess.Popen(["flashrom", "--programmer", self.constants.programmer, "--chip", self.chip_dropdown.GetStringSelection(), "--flash-size"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout.readlines()[-1].decode('utf-8').strip()
+            chipsize = subprocess.Popen([self.constants.flashrom_path,
+                                         "--programmer", self.constants.programmer,
+                                         "--chip", self.chip_dropdown.GetStringSelection(),
+                                         "--flash-size"],
+                                         stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT
+                                         ).stdout.readlines()[-1].decode('utf-8').strip()
+
             filecopy = shutil.copy(filepath, self.constants.tempdir)
             padresult = Support.AddPadding(filecopy, int(chipsize))
             filepath = filecopy
             logging.info(f"Padded temporary file by {padresult} bytes.")
-        result = subprocess.Popen(["flashrom", "--programmer", self.constants.programmer, "-w", filepath, "--chip", self.chip_dropdown.GetStringSelection()], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+
+        result = subprocess.Popen([self.constants.flashrom_path,
+                                   "--programmer", self.constants.programmer,
+                                   "-w", filepath,
+                                   "--chip", self.chip_dropdown.GetStringSelection()],
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT,
+                                   universal_newlines=True)
+
         for stdout_line in iter(result.stdout.readline, ""):
             logging.info(stdout_line.strip())
 
@@ -241,14 +266,28 @@ class PageWrite(wx.Panel):
         if self.constants.programmer == "":
             logging.info("Please select a programmer.")
             return
-        chips_raw = subprocess.Popen(["flashrom", "--programmer", self.constants.programmer, "--flash-name"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+
+        chips_raw = subprocess.Popen([self.constants.flashrom_path,
+                                      "--programmer", self.constants.programmer,
+                                      "--flash-name"],
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT,
+                                      universal_newlines=True)
+
         for stdout_line in iter(chips_raw.stdout.readline, ""):
-            if "Found" in stdout_line:                
-                logging.info("Found ROM chip: " + stdout_line.strip().split('"')[1]) # Cannot use f-string unless we use Python 3.12
+            if "Found" in stdout_line:
+                # Cannot use f-string unless we use Python 3.12
+                logging.info("Found ROM chip: " + stdout_line.strip().split('"')[1])
                 self.chip_dropdown.Append(stdout_line.strip().split('"')[1])
+
         if len(self.chip_dropdown.GetItems()) > 1:
-            logging.info("WARNING: More than 1 possible chip detected. Please select the correct chip from the dropdown.")
-            dlg = wx.MessageDialog(self, "More than 1 possible chip detected. Please select the correct chip from the dropdown.", "Warning", wx.OK | wx.ICON_WARNING)
+            logging.info(
+                "WARNING: More than 1 possible chip detected. Please select the correct chip from the dropdown."
+                )
+            dlg = wx.MessageDialog(self,
+                                   "More than 1 possible chip detected. Please select the correct chip from the dropdown.",
+                                   "Warning",
+                                   wx.OK | wx.ICON_WARNING)
             dlg.ShowModal()
             self.chip_dropdown.Enable()
         elif len(self.chip_dropdown.GetItems()) == 0:
@@ -304,42 +343,78 @@ class PageInfo(wx.Panel):
         sizer.Add(self.read_chip, 0, wx.ALIGN_CENTER | wx.BOTTOM, 10)
         sizer.Add(self.list, 1, wx.EXPAND | wx.LEFT|wx.RIGHT, 0)
         self.SetSizer(sizer)
-    
+
     def OnAutoDetect(self, event):
         if self.constants.programmer == "":
             logging.info("Please select a programmer.")
             return
-        chips_raw = subprocess.Popen(["flashrom", "--programmer", self.constants.programmer, "--flash-name"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        chips_raw = subprocess.Popen([self.constants.flashrom_path,
+                                      "--programmer", self.constants.programmer,
+                                      "--flash-name"],
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT,
+                                      universal_newlines=True)
+
         for stdout_line in iter(chips_raw.stdout.readline, ""):
-            if "Found" in stdout_line:                
-                logging.info("Found ROM chip: " + stdout_line.strip().split('"')[1]) # Cannot use f-string unless we use Python 3.12
+            if "Found" in stdout_line:
+                # Cannot use f-string unless we use Python 3.12
+                logging.info("Found ROM chip: " + stdout_line.strip().split('"')[1])
                 self.chip_dropdown.Append(stdout_line.strip().split('"')[1])
         if len(self.chip_dropdown.GetItems()) > 1:
-            logging.info("WARNING: More than 1 possible chip detected. Please select the correct chip from the dropdown.")
-            dlg = wx.MessageDialog(self, "More than 1 possible chip detected. Please select the correct chip from the dropdown.", "Warning", wx.OK | wx.ICON_WARNING)
+            logging.info(
+                "WARNING: More than 1 possible chip detected. Please select the correct chip from the dropdown."
+                )
+            dlg = wx.MessageDialog(self,
+                                   "More than 1 possible chip detected. Please select the correct chip from the dropdown.",
+                                   "Warning",
+                                   wx.OK | wx.ICON_WARNING)
             dlg.ShowModal()
             self.chip_dropdown.Enable()
         elif len(self.chip_dropdown.GetItems()) == 0:
             logging.info("No ROM chip detected. Please check your programmer connection.")
-    
+
     def GetChipInfo(self, event):
         if len(self.chip_dropdown.GetItems()) == 0:
             logging.info("Please run Auto Detect to determine your chip type.")
             return
-        result = subprocess.Popen(["flashrom", "--programmer", self.constants.programmer, "--chip", self.chip_dropdown.GetStringSelection(), "--flash-name"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        result = subprocess.Popen([self.constants.flashrom_path,
+                                   "--programmer", self.constants.programmer,
+                                   "--chip", self.chip_dropdown.GetStringSelection(),
+                                   "--flash-name"],
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT)
         result.wait()
         result = result.stdout.readlines()[-1].decode('utf-8').strip()
-        
+
         vendor = result.split('"')[1]
 
         model = result.split('"')[3]
-        size = subprocess.Popen(["flashrom", "--programmer", self.constants.programmer, "--chip", self.chip_dropdown.GetStringSelection(), "--flash-size"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        size = subprocess.Popen([self.constants.flashrom_path,
+                                 "--programmer", self.constants.programmer,
+                                 "--chip", self.chip_dropdown.GetStringSelection(),
+                                 "--flash-size"],
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
         size.wait()
         size = int(size.stdout.readlines()[-1].decode('utf-8').strip())
-        subprocess.Popen(["flashrom", "--programmer", self.constants.programmer, "-r", f"{self.constants.tempdir}/temp.bin", "--chip", self.chip_dropdown.GetStringSelection()], stdout=subprocess.PIPE, stderr=subprocess.STDOUT).wait()
+        subprocess.Popen([self.constants.flashrom_path,
+                          "--programmer", self.constants.programmer,
+                          "-r", f"{self.constants.tempdir}/temp.bin",
+                          "--chip", self.chip_dropdown.GetStringSelection()],
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT).wait()
+
         if os.path.isfile(f"{self.constants.tempdir}/temp.bin"):
             space_used = size - Support.RemovePadding(f"{self.constants.tempdir}/temp.bin")
-        write_protection = subprocess.Popen(["flashrom", "--programmer", self.constants.programmer, "--chip", self.chip_dropdown.GetStringSelection(), "--wp-status"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout.readlines()[-1].decode('utf-8').strip()
+        space_used = 0
+        write_protection = subprocess.Popen([self.constants.flashrom_path,
+                                             "--programmer", self.constants.programmer,
+                                             "--chip", self.chip_dropdown.GetStringSelection(),
+                                             "--wp-status"],
+                                             stdout=subprocess.PIPE,
+                                             stderr=subprocess.STDOUT
+                                             ).stdout.readlines()[-1].decode('utf-8').strip()
+
         self.list.SetItem(0, 1, model)
         self.list.SetItem(1, 1, vendor)
         self.list.SetItem(2, 1, str(round(size/1024,1)) + " kB")
@@ -366,7 +441,7 @@ class iFR(wx.Frame):
     """
 
     def __init__(self, parent, title):
-        wx.SystemOptions.SetOption(u"osx.openfiledialog.always-show-types","1")
+        wx.SystemOptions.SetOption("osx.openfiledialog.always-show-types","1")
         super(iFR, self).__init__(parent, title=title, size=(450, 500))
         self.InitUI()
 
@@ -377,24 +452,23 @@ class iFR(wx.Frame):
         fileMenu = wx.Menu()
 
         aboutItem = fileMenu.Append(wx.ID_ABOUT, "&About iFR")
-#        settingsItem = fileMenu.Append(wx.ID_PREFERENCES)
+        settingsItem = fileMenu.Append(wx.ID_PREFERENCES)
 
         menubar.Append(fileMenu, "&Help")
 
         self.SetMenuBar(menubar)
-        self.Bind(wx.EVT_MENU, self.on_about, id=wx.ID_ABOUT)
-#        self.Bind(wx.EVT_MENU, self.on_settings, id=wx.ID_PREFERENCES)
+        #self.Bind(wx.EVT_MENU, self.on_about, id=wx.ID_ABOUT)
+        #self.Bind(wx.EVT_MENU, self.on_settings, id=wx.ID_PREFERENCES)
 
         panel = wx.Panel(self)
-        self.toolbar = self.CreateToolBar(wx.TB_TEXT) 
-                    
-        rtool = self.toolbar.AddTool(14, 'Tools', wx.ArtProvider.GetBitmap(wx.ART_EXECUTABLE_FILE, wx.ART_TOOLBAR), shortHelp ="Radio Tool")
+        self.toolbar = self.CreateToolBar(wx.TB_TEXT)
+
         self.toolbar.EnableTool(14, False)
 
         self.programmer_combo = wx.ComboBox(self.toolbar, choices=[], size=(125,30))
         self.programmer_combo.Bind(wx.EVT_COMBOBOX, self.OnProgrammerSelect)
         self.toolbar.AddControl(self.programmer_combo, "Select Programmer")
-        self.toolbar.Realize() 
+        self.toolbar.Realize()
         sizer = wx.BoxSizer(wx.VERTICAL)
         self.notebook = wx.Notebook(panel)
         self.notebook.AddPage(PageRead(self.notebook, self.constants), "Read ROM")
@@ -424,28 +498,25 @@ class iFR(wx.Frame):
         self.PopulateAvailableProgrammers()
 
     def PopulateAvailableProgrammers(self):
-        output = subprocess.Popen(["flashrom"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        output = subprocess.Popen([self.constants.flashrom_path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         output_lines = output.stdout.readlines()
         options_start = output_lines.index(b'Valid choices are:\n')
+        if not options_start:
+            options_start = output_lines.index(b"To choose the mainboard of this computer use 'internal'. Valid choices are:\n")
         options = [line.decode('utf-8').strip() for line in output_lines[options_start+1:]]
-        programmers = list(itertools.chain.from_iterable([line.replace(".", "").replace(",", "").split() for line in options]))
-        
+        programmers = list(
+            itertools.chain.from_iterable(
+                [line.replace(".", "").replace(",", "").split() for line in options]
+                )
+            )
+
         for programmer in programmers:
             self.programmer_combo.Append(programmer)
-    
+
     def OnProgrammerSelect(self, event):
         self.constants.programmer = self.programmer_combo.GetValue()
         logging.info(f"Programmer set to {self.constants.programmer}")
-    
-    def on_about(self, event):
-        dialog = AboutDialog(self, self.constants)
-        dialog.Centre()
-        dialog.ShowModal()
-        dialog.Destroy()
-    
-#    def on_settings(self, event):
-#        dialog = PreferencesDialog()
-#        dialog.Show(self)
+
 
 if __name__ == '__main__':
     app = wx.App()
